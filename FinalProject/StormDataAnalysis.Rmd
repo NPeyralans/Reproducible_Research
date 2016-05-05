@@ -1,0 +1,204 @@
+---
+title: "StormDataAnalysis"
+author: "Nikolos Peyralans"
+date: "April 22, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("C:/Users/Nikolos/Desktop/DATA_SCIENCE/Reproducible Research/Final_Project/")
+```
+
+##Synopsis:
+This analysis will attempt to answer the two following questions: 
+1. What extreme weather events result in the largest overall cost to human health in the United States, and
+2. What extreme weather events result in the largest overall cost in damages (i.e. economic cost) in the United States. 
+These questions will be answered by looking at the National Weather Service data collected between the years 1950 and 2011.
+
+** This analysis assumes that you have the data set <b>https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2</b> in your current working directory**
+
+##Data Processing:
+
+I will create a vector to store more readable names for the columns to make data manipulation easier:
+```{r}
+colnames <- c("state_code", "start_date", "end_time", "time_zone", "county_code", "county_name", "state", "event_type", "begin_range", "begin_azi", "begin_location", "end_date", "end_time", "county_end", "countyndn", "end_range", "end_azi", "end_location", "length", "width", "f", "magnitude", "fatalities", "injuries", "property_damage", "property_damage_xp", "crop_damage", "crop_damage_xp", "weather_forecast_office", "state_office", "zone_name", "latitude", "longitude", "latitude_e", "longitude2", "remarks", "reference_number")
+```
+
+The first thing we will do is load the data into R:
+```{r}
+data <- read.csv("repdata_data_StormData.csv.bz2", col.names = colnames)
+```
+
+We will be using the dplyr package to organize the data so we should load that now.
+```{r}
+library(dplyr)
+```
+
+There are a lot of columns here that we don't need, so lets select the ones that have to do with location, health cost, and economic cost. We can discard any specific location, offices, width, length, and time zone info. We may want to look at dates so we will keep them. I might as well split it into two data sets also, one to analyze the economic cost, and another to analyze health cost.
+```{r}
+economic_data <- select(data, state, event_type, property_damage, property_damage_xp, crop_damage, crop_damage_xp, start_date, end_date, remarks, reference_number)
+economic_data <- tbl_df(economic_data)
+health_data <- select(data, state, event_type, fatalities, injuries, start_date, end_date, remarks, reference_number)
+health_data <- tbl_df(health_data)
+```
+
+Lets explore our data now:
+
+```{r}
+## Looking at health data
+summary(health_data$fatalities)
+x0 <- filter(health_data, fatalities > 25)
+dim(x0)
+x0$event_type
+x1 <- arrange(x0, desc(fatalities), desc(injuries), start_date)
+
+## Looking at economic data
+summary(economic_data$property_damage)
+summary(economic_data$property_damage_xp)
+```
+From this quick glimpse I can see that some important events for health damage will be heat and tornados. It appears also that the columns in economic_data that end in _xp are a unit. This means I need to manipulate the data to get accurate numbers in the columns. 
+
+From the documentation:
+"Alphabetical characters used to signify magnitude
+include "K" for thousands, "M" for millions, and "B" for billions." 
+
+We don't know what the other symbols mean, and since they are a small portion of the data set, we will remove those figures.
+
+First prepare the column classes for the function.
+```{r}
+economic_data$property_damage_xp <- as.character(economic_data$property_damage_xp)
+economic_data$crop_damage_xp <- as.character(economic_data$crop_damage_xp)
+```
+
+Then remove the rows where property_damage_xp is not equal to "", "K", "M" or "B". 
+```{r}
+economic_data <- filter(economic_data, property_damage_xp == "K" | property_damage_xp == "M" | property_damage_xp == "B" | property_damage_xp == "")
+```
+
+Now lets go ahead and convert the units:
+```{r}
+for (i in seq_along(economic_data$property_damage)){
+  switch(economic_data$property_damage_xp[i],
+         K={
+           #Do if units are K
+           economic_data$property_damage[i] <- economic_data$property_damage[i]*1000 
+         },
+         M={
+           #Do if units are M
+           economic_data$property_damage[i] <- economic_data$property_damage[i]*1000000 
+         },
+         B={
+           #Do if units are B
+           economic_data$property_damage[i] <- economic_data$property_damage[i]*1000000000
+         },
+         {
+           #Default case here
+           economic_data$property_damage[i] <- economic_data$property_damage[i]
+         }
+    )
+}
+```
+
+We will do the same for crop damage:
+
+(remove rows where units are unknown)
+```{r}
+economic_data <- filter(economic_data, crop_damage_xp == "K" | crop_damage_xp == "M" | crop_damage_xp == "B" | crop_damage_xp == "")
+```
+
+Note: The crop_damage_xp includes a few lower-case "k" values, however, since it is only 21 observations, we will ignore those values. 
+```{r}
+for (i in seq_along(economic_data$crop_damage)){
+  switch(economic_data$crop_damage_xp[i],
+         K={
+           #Do if units are K
+           economic_data$crop_damage[i] <- economic_data$crop_damage[i]*1000 
+         },
+         M={
+           #Do if units are M
+           economic_data$crop_damage[i] <- economic_data$crop_damage[i]*1000000 
+         },
+         B={
+           #Do if units are B
+           economic_data$crop_damage[i] <- economic_data$crop_damage[i]*1000000000
+         },
+         {
+           #Default case here
+           economic_data$crop_damage[i] <- economic_data$crop_damage[i]
+         }
+    )
+}
+```
+
+For good measure I will save the object in case I need it later.
+```{r}
+save(economic_data, file="economic_data.RData")
+```
+
+Now that we have the correct figures for the property damage, we can delete the extra rows for simplicity's sake. The goal here is to just have the most important information for our analysis: We want the name of the state, the event type, and the two measurements of economic damage. 
+```{r}
+economic_data <- select(economic_data, state, event_type, property_damage, crop_damage, reference_number)
+```
+
+Now let us clean up the data for measuring the effect on human health. In fact, it looks as if everything is in order, so lets just get rid of the rows that we don't want for our plots:
+```{r}
+health_data <- select(health_data, state, event_type, fatalities, injuries, reference_number)
+```
+
+We will also need a column for total loss for economic and health data.
+```{r}
+economic_data <- mutate(economic_data, total_economic_damage = property_damage + crop_damage)
+health_data <- mutate(health_data, total_health_damage = injuries + fatalities)
+```
+
+Once we have the information that we needs let us plot some figure to view the correlation between event type and economic/health cost.
+```{r}
+library(ggplot2)
+```
+
+The number of event types that we have to sort through is far too many to plot, so let us filter the rows only for the highest amounts of damage:
+```{r}
+x0 <- filter(economic_data, total_economic_damage > 5.0e+9)
+## Change the values to better graph
+dim(x0)
+```
+Now we have data that we can view on a graph. 
+
+Lets plot the total economic damage against event type with the coloring for each type of economic cost.  
+
+** We need to be cautious in interpreting this plot because the color represents the amount of property damage and is not a percentage. Therefore, it is not related to the height of the bar **
+```{r}
+econ_plot <- ggplot(x0, aes(x=factor(event_type), y=total_economic_damage, fill=property_damage)) + geom_bar(stat="identity", position="dodge") + labs(title="Total Economic Cost vs. Severe Weather Event", y="Total Economic Damage (Crop + Property) in USD", x="Event Type") + guides(fill=guide_legend(title="Property Damage"))
+econ_plot
+```
+
+And we'll do something similar with health data. The coloring shows you how much of the related incidents were fatalities, and how many were injuries.
+
+** We need to be cautious in interpreting this plot because the color represents the amount of injuries and is not a percentage. Therefore, it is not related to the height of the bar **
+```{r}
+x1 <- filter(health_data, total_health_damage > 500)
+health_plot <- ggplot(x1, aes(x=factor(event_type), y=total_health_damage, fill=fatalities)) + geom_bar(stat="identity", position="dodge") + labs(title="Total Health Cost vs. Severe Weather Event", y="Total Health Damage (Injuries + Fatalities)", x="Event Type") + guides(fill=guide_legend(title="Fatalitites"))
+health_plot
+```
+
+#Results
+
+The preceding plots show us that the most harmful events in terms of economic damage (i.e. crop + property damage) are:
+1. Floods
+2. Storm surges
+3. Hurricanes/Typhoons
+4. River floods
+
+The plots also show us that in terms of health cost (if we are measuring the total health cost as total number of fatalities and injuries), the most severe weather events are:
+1. Tornados
+2. Ice Storms
+3. Floods
+4. Hurricanes/Typhoons
+5. Heat
+We can also observe that if we were to have a different metric for measuring damage, such as fatalities, that the "Heat" event caused the most fatalities. 
+
+
+
+
+
